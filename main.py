@@ -11,14 +11,11 @@ def main():
     )
 
     try:
-        # ticket = fs.ticket(13).get()
-        # ticket.category = "Software"
-        # ticket.sub_category = None
-        # ticket.update()
-        # pprint.pprint(ticket.to_dict())
-        fs.ticket(13).update(payload=[["priority", 3]])
-        # print(f"Subject: {ticket.subject}")
-        # print(f"Status: {ticket.status}")
+        ticket = fs.ticket(13).get()
+        ticket.priority = 3
+        ticket.update()
+        print(f"Subject: {ticket.subject}")
+        print(f"Priority: {ticket.priority}")
     except Exception as e:
         print(f"Error: {e}")
 

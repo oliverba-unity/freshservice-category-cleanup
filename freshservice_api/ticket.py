@@ -4,12 +4,12 @@ from typing import Any, TYPE_CHECKING
 
 # Prevent "Circular Import" error
 if TYPE_CHECKING:
-    from freshservice_api.freshservice_api import FreshserviceApiClient
+    from freshservice_api.freshservice_api import FreshserviceApi
 
 type TicketPayload = list[list[str | int | bool | list[str] | dict[str, Any]]]
 
 class Ticket:
-    def __init__(self, client: FreshserviceApiClient, ticket_id: int | None = None, **kwargs):
+    def __init__(self, client: FreshserviceApi, ticket_id: int | None = None, **kwargs):
         if "id" in kwargs:
             raise ValueError("'id' must be passed as an argument, not in keyword arguments.")
 
@@ -69,16 +69,16 @@ class Ticket:
     def path(self) -> str:
         return f"tickets/{self.id}" if self.id else "tickets"
 
-    def get(self) -> Ticket:
-        if not self.id:
-            raise ValueError("Cannot 'get' a ticket without an ID.")
-        return self._hydrate(self.client._request("GET", self.path))
-
     def create(self, payload: TicketPayload | None = None) -> Ticket:
         if self.id:
-            raise ValueError("Cannot specify ID when creating ticket")
+            raise ValueError("Cannot specify ID when creating ticket.")
         body = dict(payload) if payload is not None else self._to_payload()
         return self._hydrate(self.client._request("POST", self.path, json=body))
+
+    def get(self) -> Ticket:
+        if not self.id:
+            raise ValueError("Cannot get a ticket without an ID.")
+        return self._hydrate(self.client._request("GET", self.path))
 
     def update(self, payload: TicketPayload | None = None) -> Ticket:
         if not self.id:
@@ -88,7 +88,7 @@ class Ticket:
 
     def delete(self) -> dict[str, Any]:
         if not self.id:
-            raise ValueError("Cannot delete a ticket that has no ID.")
+            raise ValueError("Cannot delete a ticket without an ID.")
         response = self.client._request("DELETE", self.path)
         self.deleted = True
         return response
@@ -131,6 +131,7 @@ class Ticket:
         return payload
 
     def _hydrate(self, data: dict[str, Any]) -> Ticket:
+        data = data.get("ticket", data) if isinstance(data, dict) else data
         date_fields = ('created_at', 'updated_at', 'due_by', 'fr_due_by')
         if isinstance(data, dict):
             for key, value in data.items():
