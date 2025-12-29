@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timedelta
 import requests
 from typing import Any
 from .ticket import Ticket
@@ -16,27 +17,46 @@ class FreshserviceApi:
 
         self.rate_limit_total: int | None = None
         self.rate_limit_remaining: int | None = None
+        self.rate_limit_hit: bool = False
+        self.retry_after_until: datetime | None = None
 
     def _request(self, method: str, path: str, max_retries: int = 5, **kwargs) -> dict[str, Any]:
         url = f"{self.base_url}/{path.lstrip('/')}"
         attempts = 0
 
         while attempts <= max_retries:
+            # If we know we are currently rate limited, wait before even trying
+            if self.rate_limit_hit and self.retry_after_until:
+                now = datetime.now()
+                if now < self.retry_after_until:
+                    wait_seconds = (self.retry_after_until - now).total_seconds()
+                    print(
+                        f"Currently rate limited. Waiting {wait_seconds:.0f}s...")
+                    time.sleep(wait_seconds)
+
+                # Reset status after waiting
+                self.rate_limit_hit = False
+                self.retry_after_until = None
+
             response: requests.Response = self.session.request(method, url, **kwargs)
 
-            self.rate_limit_total = int(response.headers.get("x-ratelimit-total", 0))
-            self.rate_limit_remaining = int(response.headers.get("x-ratelimit-remaining", 0))
+            self.rate_limit_total = int(response.headers.get("x-ratelimit-total", 0)) or self.rate_limit_total
+            self.rate_limit_remaining = int(
+                response.headers.get("x-ratelimit-remaining", 0)) or self.rate_limit_remaining
 
             if response.status_code == 429:
                 attempts += 1
                 if attempts > max_retries:
                     break
 
-                # Priority 1: Retry-After | Priority 2: Exponential Backoff
-                retry_after = response.headers.get("Retry-After")
-                wait_time = int(retry_after) if retry_after else (2 ** attempts)
+                self.rate_limit_hit = True
+                retry_header = response.headers.get("Retry-After")
+                wait_time = int(retry_header) if retry_header else (2 ** attempts)
 
-                time.sleep(wait_time)
+                # Set absolute datetime for when it's safe to retry
+                self.retry_after_until = datetime.now() + timedelta(seconds=wait_time)
+
+                print(f"Rate limit 429 received. Blocked until {self.retry_after_until.strftime('%H:%M:%S')}")
                 continue
 
             try:
@@ -46,8 +66,6 @@ class FreshserviceApi:
                     error_data = response.json()
                 except ValueError:
                     error_data = response.text
-
-                # Raise our custom HTTP error
                 raise FreshserviceHTTPError(f"{e} | {error_data}", response=response) from None
 
             return {} if response.status_code == 204 else response.json()
