@@ -11,11 +11,14 @@ def main():
     )
 
     try:
-        ticket = fs.ticket(13).get()
-        ticket.priority = 3
-        ticket.update()
-        print(f"Subject: {ticket.subject}")
-        print(f"Priority: {ticket.priority}")
+        tickets_api = fs.ticket()
+        ticket = tickets_api.get(1)
+        print(f"Priority: {ticket.get('priority')}")
+
+        tickets_api.update(1, {"priority": 1})
+
+        ticket = tickets_api.get(1)
+        print(f"Priority: {ticket.get('priority')}")
     except Exception as e:
         print(f"Error: {e}")
 

@@ -39,6 +39,6 @@ class FreshserviceApi:
 
             return response.json()
 
-    def ticket(self, ticket_id: int | None = None, **kwargs) -> Ticket:
-        """Returns a Ticket instance scoped to the instance of this FreshserviceApi class."""
-        return Ticket(self, ticket_id, **kwargs)
+    def ticket(self) -> Ticket:
+        """Returns the stateless Ticket API wrapper."""
+        return Ticket(self)
