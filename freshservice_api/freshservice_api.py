@@ -1,12 +1,10 @@
-from __future__ import annotations
-from typing import Any
+import time
 import requests
-
-from freshservice_api.ticket import Ticket
+from typing import Any
+from .ticket import Ticket
+from .exceptions import FreshserviceHTTPError, FreshserviceRateLimitError
 
 class FreshserviceApi:
-    """Interface for Freshservice API."""
-
     def __init__(self, api_key: str, domain: str):
         self.api_key = api_key
         self.api_version = "v2"
@@ -16,29 +14,45 @@ class FreshserviceApi:
         self.session.auth = (api_key, "X")
         self.session.headers.update({"Content-Type": "application/json"})
 
-    def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
-        """Make a request to the Freshservice API."""
-        url = f"{self.base_url}/{path.lstrip('/')}"
+        self.rate_limit_total: int | None = None
+        self.rate_limit_remaining: int | None = None
 
-        with self.session.request(method, url, **kwargs) as response:
+    def _request(self, method: str, path: str, max_retries: int = 5, **kwargs) -> dict[str, Any]:
+        url = f"{self.base_url}/{path.lstrip('/')}"
+        attempts = 0
+
+        while attempts <= max_retries:
+            response: requests.Response = self.session.request(method, url, **kwargs)
+
+            self.rate_limit_total = int(response.headers.get("x-ratelimit-total", 0))
+            self.rate_limit_remaining = int(response.headers.get("x-ratelimit-remaining", 0))
+
+            if response.status_code == 429:
+                attempts += 1
+                if attempts > max_retries:
+                    break
+
+                # Priority 1: Retry-After | Priority 2: Exponential Backoff
+                retry_after = response.headers.get("Retry-After")
+                wait_time = int(retry_after) if retry_after else (2 ** attempts)
+
+                time.sleep(wait_time)
+                continue
+
             try:
-                # Throw HTTPError for 4xx or 5xx responses
                 response.raise_for_status()
             except requests.exceptions.HTTPError as e:
-                # Try to append response JSON as it may contain error details
                 try:
-                    error_response = response.json()
-                    custom_msg = f"{e} | Response body: {error_response}"
-                    raise requests.exceptions.HTTPError(custom_msg, response=response) from None
-                except (ValueError, KeyError):
-                    # If the response is not JSON, just raise the original error
-                    raise e
+                    error_data = response.json()
+                except ValueError:
+                    error_data = response.text
 
-            if response.status_code == 204:
-                return {}
+                # Raise our custom HTTP error
+                raise FreshserviceHTTPError(f"{e} | {error_data}", response=response) from None
 
-            return response.json()
+            return {} if response.status_code == 204 else response.json()
+
+        raise FreshserviceRateLimitError(f"Max retries ({max_retries}) reached for 429 errors.")
 
     def ticket(self) -> Ticket:
-        """Returns the stateless Ticket API wrapper."""
         return Ticket(self)
