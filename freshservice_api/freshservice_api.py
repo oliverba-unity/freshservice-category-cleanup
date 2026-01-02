@@ -1,3 +1,4 @@
+import httpx
 import time
 from datetime import datetime, timedelta
 import requests
@@ -11,9 +12,12 @@ class FreshserviceApi:
         self.api_version = "v2"
         self.base_url = f"https://{domain}/api/{self.api_version}"
 
-        self.session = requests.Session()
-        self.session.auth = (api_key, "X")
-        self.session.headers.update({"Content-Type": "application/json"})
+        self.client = httpx.Client(
+            auth=(api_key, "X"),
+            http2=True,
+            headers={"Content-Type": "application/json"},
+            timeout=60.0
+        )
 
         self.rate_limit_total: int | None = None
         self.rate_limit_remaining: int | None = None
@@ -71,6 +75,14 @@ class FreshserviceApi:
             return {} if response.status_code == 204 else response.json()
 
         raise FreshserviceRateLimitError(f"Max retries ({max_retries}) reached for 429 errors.")
+            except httpx.RequestError as e:
+                raise FreshserviceHTTPError(f"Request Error: {e}", response=None) from None
+
+        raise FreshserviceRateLimitError(f"All {max_retries} retries have failed - aborting.")
 
     def ticket(self) -> Ticket:
         return Ticket(self)
+
+    def close(self):
+        """Close the HTTP connection."""
+        self.client.close()
