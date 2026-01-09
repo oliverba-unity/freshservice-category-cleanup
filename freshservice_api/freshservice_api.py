@@ -1,6 +1,5 @@
 import httpx
 import time
-from typing import Any
 from .ticket import Ticket
 from .rate_limit_controller import RateLimitController
 from .exceptions import FreshserviceHTTPError, FreshserviceRateLimitError
@@ -24,7 +23,7 @@ class FreshserviceApi:
 
         self.controller = RateLimitController(headroom=headroom)
 
-    def _request(self, method: str, path: str, max_retries: int = 5, **kwargs) -> dict[str, Any]:
+    def request(self, method: str, path: str, max_retries: int = 5, **kwargs) -> httpx.Response:
         url = f"{self.base_url}/{path.lstrip('/')}"
         attempts = 0
 
@@ -47,7 +46,7 @@ class FreshserviceApi:
                     continue
 
                 response.raise_for_status()
-                return {} if response.status_code == 204 else response.json()
+                return response
 
             except httpx.RequestError as e:
                 self.controller.update_and_notify({}) # Release slot with empty headers
