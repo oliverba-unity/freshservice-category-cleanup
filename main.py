@@ -1,69 +1,60 @@
 import os
-import time
-import concurrent.futures
+import argparse
 from dotenv import load_dotenv
+
 from freshservice_api.freshservice_api import FreshserviceApi
-from freshservice_api.exceptions import FreshserviceError
+from ticket_category_updater import TicketCategoryUpdater
 
 load_dotenv()
 
 def main():
-    fs = FreshserviceApi(
+    parser = argparse.ArgumentParser(description="Freshservice Category Cleanup")
+    parser.add_argument(
+        "--create-tables",
+        action="store_true",
+        help="Create tables in database for ticket and category data"
+    )
+
+    parser.add_argument(
+        "--prepare",
+        action="store_true",
+        help="Prepare tickets in the database with their new categories, ready for updating via API"
+    )
+
+    parser.add_argument(
+        "--run",
+        action="store_true",
+        help="Update tickets in Freshservice using data from the database"
+    )
+
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Retry tickets that failed in previous runs (HTTP code != 200)"
+    )
+
+    args = parser.parse_args()
+
+    fs_api = FreshserviceApi(
         api_key=os.getenv("FRESHSERVICE_API_KEY"),
         domain=os.getenv("FRESHSERVICE_API_DOMAIN"),
         headroom=5
     )
+    ticket_category_updater = TicketCategoryUpdater(fs_api)
 
-    ticket_service = fs.ticket()
-    ticket_id = 1
+    if args.create_tables:
+        ticket_category_updater.create_tables()
 
-    total_requests = 1000
-    concurrency = 50
+    elif args.prepare:
+        ticket_category_updater.prepare()
 
-    start_time = time.time()
-    completed_count = 0
+    elif args.run:
+        ticket_category_updater.run()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-
-        futures = {
-            executor.submit(ticket_service.get, ticket_id): i
-            for i in range(1, total_requests + 1)
-        }
-
-        for future in concurrent.futures.as_completed(futures):
-            req_num = futures[future]
-            completed_count += 1
-
-            try:
-                _ = future.result()
-
-                remaining = fs.controller.server_ratelimit_remaining
-                total = fs.controller.server_ratelimit_total
-
-                now = time.time()
-                elapsed = now - start_time
-                if elapsed < 0.001: elapsed = 0.001  # Avoid zero division
-                requests_per_minute = (completed_count / elapsed) * 60
-
-                used = total - remaining
-                percent_used = (used / total) * 100
-                bar_len = 20
-                filled = int(bar_len * percent_used / 100)
-                bar = '█' * filled + '-' * (bar_len - filled)
-
-                print(f"[{req_num:04d}/{total_requests}] ✅ Success. "
-                      f"Quota: {remaining:04d}/{total} [{bar}] "
-                      f"Requests per minute: {requests_per_minute:.1f}")
-
-            except FreshserviceError as e:
-                print(f"[{req_num:04d}] ❌ Failed: {e}")
-            except Exception as e:
-                print(f"[{req_num:04d}] 💥 Unexpected: {e}")
-
-    final_duration = time.time() - start_time
-    print(f"Overall requests per minute: {total_requests / (final_duration / 60):.2f}")
-
-    fs.close()
+    elif args.retry_failed:
+        TicketCategoryUpdater(fs_api).retry_failed()
+    else:
+        print("No arguments provided")
 
 if __name__ == "__main__":
     main()
