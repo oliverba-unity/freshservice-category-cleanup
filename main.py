@@ -3,8 +3,8 @@ import argparse
 from dotenv import load_dotenv
 
 from freshservice_api.freshservice_api import FreshserviceApi
-from ticket_category_updater import TicketCategoryUpdater
-from ticket_importer import TicketImporter
+from freshservice_api.batch_ticket_importer import BatchTicketImporter
+from freshservice_api.batch_ticket_category_updater import BatchTicketCategoryUpdater
 
 load_dotenv()
 
@@ -50,7 +50,7 @@ def main():
     )
 
     if args.action == "import-tickets":
-        ticket_importer = TicketImporter(fs_api)
+        ticket_importer = BatchTicketImporter(fs_api=fs_api, db_filename=os.getenv("DB_FILENAME_IMPORT"))
 
         if args.create_tables:
             ticket_importer.create_tables()
@@ -66,7 +66,7 @@ def main():
 
     elif args.action == "update-tickets":
 
-        ticket_category_updater = TicketCategoryUpdater(fs_api)
+        ticket_category_updater = BatchTicketCategoryUpdater(fs_api=fs_api, db_filename=os.getenv("DB_FILENAME_UPDATE"))
 
         if args.create_tables:
             ticket_category_updater.create_tables()
