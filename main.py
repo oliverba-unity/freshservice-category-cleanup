@@ -4,11 +4,13 @@ from dotenv import load_dotenv
 
 from freshservice_api.freshservice_api import FreshserviceApi
 from ticket_category_updater import TicketCategoryUpdater
+from ticket_importer import TicketImporter
 
 load_dotenv()
 
 def main():
     parser = argparse.ArgumentParser(description="Freshservice Category Cleanup")
+    parser.add_argument('action')
     parser.add_argument(
         "--create-tables",
         action="store_true",
@@ -40,21 +42,43 @@ def main():
         domain=os.getenv("FRESHSERVICE_API_DOMAIN"),
         headroom=5
     )
-    ticket_category_updater = TicketCategoryUpdater(fs_api)
 
-    if args.create_tables:
-        ticket_category_updater.create_tables()
+    if args.action == "import-tickets":
+        ticket_importer = TicketImporter(fs_api)
 
-    elif args.prepare:
-        ticket_category_updater.prepare()
+        if args.create_tables:
+            ticket_importer.create_tables()
 
-    elif args.run:
-        ticket_category_updater.run()
+        elif args.run:
+            ticket_importer.run()
 
-    elif args.retry_failed:
-        TicketCategoryUpdater(fs_api).retry_failed()
+        elif args.retry_failed:
+            ticket_importer.retry_failed()
+
+        else:
+            print("No arguments provided")
+
+    elif args.action == "update-tickets":
+
+        ticket_category_updater = TicketCategoryUpdater(fs_api)
+
+        if args.create_tables:
+            ticket_category_updater.create_tables()
+
+        elif args.prepare:
+            ticket_category_updater.prepare()
+
+        elif args.run:
+            ticket_category_updater.run()
+
+        elif args.retry_failed:
+            ticket_category_updater.retry_failed()
+        else:
+            print("No arguments provided")
     else:
-        print("No arguments provided")
+        print("Provide an action: import-tickets or update-tickets")
+    exit()
+
 
 if __name__ == "__main__":
     main()
