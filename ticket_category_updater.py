@@ -224,7 +224,12 @@ class TicketCategoryUpdater(object):
                     executor.submit(self._ticket_update_worker)
                 )
 
-            concurrent.futures.wait(futures)
+            # As futures finish, return their result, to re-raise and catch any exceptions
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"Worker thread failed: {e}")
 
         finish_time = time.time()
         final_duration = finish_time - self.start_time
