@@ -1,5 +1,5 @@
 import datetime
-import itertools
+import json
 import time
 import threading
 import concurrent.futures
@@ -8,16 +8,14 @@ from typing import Optional
 
 from freshservice_api.freshservice_api import FreshserviceApi
 
-print_lock = threading.Lock() # Prevent threads from simultaneously outputting to the console
-db_lock = threading.Lock() # Prevent threads from simultaneously interacting with the database
-
 class TicketCategoryUpdater(object):
 
     def __init__(self, fs_api: FreshserviceApi, db_filename: str="ticket_category_update.sqlite"):
         self.fs_api = fs_api
-        self.db = sqlite3.connect(db_filename)
-        self.db.row_factory = sqlite3.Row
+        self.db_filename = db_filename
         self.counter = None
+        self.count_lock = threading.Lock()  # Prevent threads from simultaneously incrementing the counter
+        self.print_lock = threading.Lock() # Prevent threads from simultaneously outputting to the console
         self.start_time = None
 
     def create_tables(self):
@@ -57,20 +55,25 @@ class TicketCategoryUpdater(object):
             new_item_category TEXT
         );
         """
-        self.db.execute(create_tickets_table)
-        self.db.execute(create_valid_categories_table)
-        self.db.execute(create_category_mappings_table)
+        db = sqlite3.connect(database=self.db_filename, timeout=30.0)
+        db.row_factory = sqlite3.Row
+        db.execute(create_tickets_table)
+        db.execute(create_valid_categories_table)
+        db.execute(create_category_mappings_table)
 
         print("Created tables.")
 
     def prepare(self):
+        db = sqlite3.connect(database=self.db_filename, timeout=30.0)
+        db.row_factory = sqlite3.Row
+
         query = """
         SELECT * FROM tickets 
         WHERE update_state IS NULL
         ORDER BY id DESC 
         """
 
-        tickets = self.db.execute(query).fetchall()
+        tickets = db.execute(query).fetchall()
 
         skipped = 0
         unmapped = 0
@@ -88,7 +91,7 @@ class TicketCategoryUpdater(object):
                         SET update_state = 'skipped'
                         WHERE id = ?
                         """
-                self.db.execute(query, (ticket["id"],))
+                db.execute(query, (ticket["id"],))
                 skipped = skipped + 1
             else:
                 new = self.get_new_category(ticket["category"], ticket["sub_category"], ticket["item_category"])
@@ -101,7 +104,7 @@ class TicketCategoryUpdater(object):
                                 new_item_category = ?
                             WHERE id = ?;
                             """
-                    self.db.execute(
+                    db.execute(
                         query,
                         (
                             new["new_category"],
@@ -117,12 +120,12 @@ class TicketCategoryUpdater(object):
                             SET update_state = 'unmapped'
                             WHERE id = ?;
                             """
-                    self.db.execute(query, (ticket["id"],))
+                    db.execute(query, (ticket["id"],))
                     unmapped = unmapped + 1
 
             total = total + 1
 
-        self.db.commit()
+        db.commit()
 
         print(f"Prepared {total} tickets:")
         print(f"{skipped} skipped - already have valid categories.")
@@ -135,6 +138,9 @@ class TicketCategoryUpdater(object):
             sub_category: Optional[str]=None,
             item_category: Optional[str]=None
     ) -> bool:
+        db = sqlite3.connect(database=self.db_filename, timeout=30.0)
+        db.row_factory = sqlite3.Row
+
         if category and sub_category and item_category:
             query = """
             SELECT * FROM valid_categories 
@@ -143,7 +149,7 @@ class TicketCategoryUpdater(object):
             AND item_category = ?
             LIMIT 1;
             """
-            cursor = self.db.execute(query, (category, sub_category, item_category))
+            cursor = db.execute(query, (category, sub_category, item_category))
         elif category and sub_category:
             query = """
             SELECT * FROM valid_categories 
@@ -152,7 +158,7 @@ class TicketCategoryUpdater(object):
             AND item_category IS NULL
             LIMIT 1;
             """
-            cursor = self.db.execute(query, (category, sub_category))
+            cursor = db.execute(query, (category, sub_category))
         elif category:
             query = """
             SELECT * FROM valid_categories 
@@ -161,7 +167,7 @@ class TicketCategoryUpdater(object):
             AND item_category IS NULL
             LIMIT 1;
             """
-            cursor = self.db.execute(query, (category,))
+            cursor = db.execute(query, (category,))
         else:
             return False
 
@@ -171,11 +177,14 @@ class TicketCategoryUpdater(object):
             return True
         return False
 
-    def get_new_category(self,
-                         old_category: str,
-                         old_sub_category: Optional[str] = None,
-                         old_item_category: Optional[str] = None
-                         ) -> Optional[sqlite3.Row]:
+    def get_new_category(
+            self,
+             old_category: str,
+             old_sub_category: Optional[str] = None,
+             old_item_category: Optional[str] = None
+    ) -> Optional[sqlite3.Row]:
+        db = sqlite3.connect(database=self.db_filename, timeout=30.0)
+        db.row_factory = sqlite3.Row
 
         if old_sub_category and old_item_category:
             query = """
@@ -186,7 +195,7 @@ class TicketCategoryUpdater(object):
                       AND old_item_category = ?
                     LIMIT 1; \
                     """
-            cursor = self.db.execute(query, (old_category, old_sub_category, old_item_category))
+            cursor = db.execute(query, (old_category, old_sub_category, old_item_category))
         elif old_sub_category:
             query = """
                     SELECT * \
@@ -196,7 +205,7 @@ class TicketCategoryUpdater(object):
                       AND old_item_category IS NULL
                     LIMIT 1; \
                     """
-            cursor = self.db.execute(query, (old_category, old_sub_category))
+            cursor = db.execute(query, (old_category, old_sub_category))
         else:
             query = """
                     SELECT * \
@@ -206,16 +215,18 @@ class TicketCategoryUpdater(object):
                       AND old_item_category IS NULL
                     LIMIT 1; \
                     """
-            cursor = self.db.execute(query, (old_category,))
+            cursor = db.execute(query, (old_category,))
 
         return cursor.fetchone()
 
     def run(self, max_workers: int=10):
-
         print(f"Starting ticket category updater with {max_workers} worker threads...")
 
+        db = sqlite3.connect(database=self.db_filename, timeout=30.0)
+        db.row_factory = sqlite3.Row
+
         self.start_time = time.time()
-        self.counter = itertools.count(start=1)
+        self.counter = 0
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
@@ -235,14 +246,15 @@ class TicketCategoryUpdater(object):
         final_duration = finish_time - self.start_time
         self.fs_api.close()
 
-        final_count = next(self.counter) - 1
-
-        print(f"Processed {final_count} tickets in {final_duration:.2f} seconds.")
+        print(f"Processed {self.counter} tickets in {final_duration:.2f} seconds.")
 
         if final_duration > 0:
-            print(f"Overall requests per minute: {(final_count / final_duration) * 60:.2f}")
+            print(f"Overall requests per minute: {(self.counter / final_duration) * 60:.2f}")
 
     def retry_failed(self):
+        db = sqlite3.connect(database=self.db_filename, timeout=30.0)
+        db.row_factory = sqlite3.Row
+
         query = """
         UPDATE tickets
         SET update_state = NULL,
@@ -252,7 +264,9 @@ class TicketCategoryUpdater(object):
         WHERE update_state = 'failed';
         """
 
-        result = self.db.execute(query)
+        result = db.execute(query)
+        db.commit()
+
         quantity_to_retry = result.rowcount
 
         if quantity_to_retry > 0:
@@ -262,42 +276,52 @@ class TicketCategoryUpdater(object):
             print(f"No tickets to retry.")
 
     def _ticket_update_worker(self):
+        db = sqlite3.connect(database=self.db_filename, timeout=30.0)
+        db.row_factory = sqlite3.Row
+
         while True:
+            ticket_row = None
 
-            with db_lock:
+            try:
+                db.execute("BEGIN IMMEDIATE")
+                next_ticket_query = """
+                    SELECT *
+                    FROM tickets
+                    WHERE update_state = 'ready'
+                    ORDER BY id DESC
+                    LIMIT 1;
+                    """
+                ticket_row = db.execute(next_ticket_query).fetchone()
 
-                query = """
-                        SELECT *
-                        FROM tickets
-                        WHERE update_state = 'ready'
-                        ORDER BY id DESC
-                        LIMIT 1;
-                        """
-                ticket = self.db.execute(query).fetchone()
-
-                if not ticket:
-                    # No more tickets left in the DB
+                if not ticket_row:
+                    db.rollback()
                     break
 
-                query = """
+                in_progress_query = """
                         UPDATE tickets
                         SET update_state      = 'in-progress',
                             request_timestamp = ?
                         WHERE id = ?;
                         """
 
-                self.db.execute(query, (datetime.datetime.now(), ticket['id']))
+                db.execute(in_progress_query, (datetime.datetime.now(), ticket_row['id']))
+                db.commit()
+            except sqlite3.OperationalError:
+                db.rollback()
 
-            update_payload = {"category": ticket['new_category']}
-            if ticket['new_sub_category']:
-                update_payload["sub_category"] = ticket['new_sub_category']
-            if ticket['new_item_category']:
-                update_payload["item_category"] = ticket['new_item_category']
-
-            status_code = None
+            ticket_update_payload = {"category": ticket_row['new_category']}
+            if ticket_row['new_sub_category']:
+                ticket_update_payload["sub_category"] = ticket_row['new_sub_category']
+            if ticket_row['new_item_category']:
+                ticket_update_payload["item_category"] = ticket_row['new_item_category']
 
             try:
-                response = self.fs_api.ticket().update(ticket['id'], update_payload)
+                response = self.fs_api.ticket().update(ticket_row['id'], ticket_update_payload)
+
+                status_code = response.status_code
+
+                with self.count_lock:
+                    self.counter += 1
 
                 query = """
                         UPDATE tickets
@@ -306,20 +330,23 @@ class TicketCategoryUpdater(object):
                         WHERE id = ?;
                         """
 
-                self.db.execute(query, (datetime.datetime.now(), response.status_code, ticket['id']))
+                db.execute(query, (datetime.datetime.now(), response.status_code, ticket_row['id']))
+                db.commit()
 
             except Exception as e:
                 error_message = str(e)
+                status_code = None
 
                 if hasattr(e, 'response') and e.response is not None:
                     status_code = e.response.status_code
                     try:
                         # Try to get a clean error message from JSON
-                        error_message = e.response.json()
+                        error_json = e.response.json()
+                        error_message = json.dumps(error_json)
                     except:
-                        pass
+                        error_message = e.response.text
 
-                query = """
+                update = """
                         UPDATE tickets
                         SET update_state            = 'failed',
                             response_status_code    = ?,
@@ -327,32 +354,22 @@ class TicketCategoryUpdater(object):
                         WHERE id = ?;
                         """
 
-                self.db.execute(
-                    query,
-                    (
-                        datetime.datetime.now(),
-                        status_code,
-                        error_message,
-                        ticket['id']
-                    )
-                )
-
-            next(self.counter)
+                db.execute(update,(datetime.datetime.now(), status_code, error_message, ticket_row['id']))
+                db.commit()
 
             self._print_progress(
-                ticket_id=ticket['id'],
+                row_id=ticket_row['id'],
                 status_code=status_code
             )
 
-        self.db.close()
+        db.close()
 
-    def _print_progress(self, ticket_id: int, status_code: int | None = None):
+    def _print_progress(self, row_id: int, status_code: int | None = None):
         now = time.time()
         elapsed = now - self.start_time
-        count = next(self.counter) - 1
-        requests_per_minute = (count / elapsed) * 60 if elapsed > 0 else 0
+        requests_per_minute = (self.counter / elapsed) * 60 if elapsed > 0 else 0
 
-        ratelimit_remaining = self.fs_api.controller.server_ratelimit_remaining,
+        ratelimit_remaining = self.fs_api.controller.server_ratelimit_remaining
         ratelimit_total = self.fs_api.controller.server_ratelimit_total
 
         used = ratelimit_total - ratelimit_remaining
@@ -371,8 +388,8 @@ class TicketCategoryUpdater(object):
             case _:
                 icon = "❌"
 
-        with print_lock:
-            print(f"Ticket {ticket_id:06d} {icon} HTTP {status_code} "
+        with self.print_lock:
+            print(f"Ticket {row_id:06d} {icon} HTTP {status_code} "
                   f"[{bar}] Rate limit: {ratelimit_total} req/min. "
                   f"Remaining: {ratelimit_remaining:03d}. "
                   f"Current: {requests_per_minute:.1f} req/min")
