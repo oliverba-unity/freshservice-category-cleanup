@@ -30,6 +30,12 @@ def main():
     )
 
     parser.add_argument(
+        "--limit",
+        action="store",
+        help="Limit the number of tickets to process"
+    )
+
+    parser.add_argument(
         "--retry-failed",
         action="store_true",
         help="Retry tickets that failed in previous runs (HTTP code != 200)"
@@ -50,7 +56,7 @@ def main():
             ticket_importer.create_tables()
 
         elif args.run:
-            ticket_importer.run()
+            ticket_importer.run(limit=args.limit)
 
         elif args.retry_failed:
             ticket_importer.retry_failed()
