@@ -330,7 +330,7 @@ class TicketCategoryUpdater(object):
                         WHERE id = ?;
                         """
 
-                db.execute(query, (datetime.datetime.now(), response.status_code, ticket_row['id']))
+                db.execute(query, (response.status_code, ticket_row['id']))
                 db.commit()
 
             except Exception as e:
