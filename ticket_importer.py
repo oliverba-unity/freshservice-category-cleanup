@@ -85,6 +85,7 @@ class TicketImporter(object):
         db = sqlite3.connect(database=self.db_filename, timeout=30.0)
         db.row_factory = sqlite3.Row
 
+        # TODO: Instead of resetting failed rows and run through all rows, only retry failed rows
         query = """
         UPDATE tickets
         SET request_timestamp = NULL,
