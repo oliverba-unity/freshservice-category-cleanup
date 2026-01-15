@@ -75,7 +75,7 @@ def main():
             ticket_category_updater.prepare()
 
         elif args.run:
-            ticket_category_updater.run()
+            ticket_category_updater.run(limit=args.limit)
 
         elif args.retry_failed:
             ticket_category_updater.retry_failed()

@@ -13,7 +13,10 @@ class TicketCategoryUpdater(object):
     def __init__(self, fs_api: FreshserviceApi, db_filename: str="ticket_category_update.sqlite"):
         self.fs_api = fs_api
         self.db_filename = db_filename
-        self.counter = None
+        self.iteration_count = 0
+        self.iteration_limit = None
+        self.success_count = 0
+        self.failure_count = 0
         self.count_lock = threading.Lock()  # Prevent threads from simultaneously incrementing the counter
         self.print_lock = threading.Lock() # Prevent threads from simultaneously outputting to the console
         self.start_time = None
@@ -219,14 +222,18 @@ class TicketCategoryUpdater(object):
 
         return cursor.fetchone()
 
-    def run(self, max_workers: int=10):
+    def run(self, limit: int=None, max_workers: int=10):
         print(f"Starting ticket category updater with {max_workers} worker threads...")
 
         db = sqlite3.connect(database=self.db_filename, timeout=30.0)
         db.row_factory = sqlite3.Row
 
         self.start_time = time.time()
-        self.counter = 0
+        self.iteration_count = 0
+
+        if limit:
+            self.iteration_limit = int(limit)
+            print(f"Limit set to {limit} tickets.")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
@@ -246,10 +253,12 @@ class TicketCategoryUpdater(object):
         final_duration = finish_time - self.start_time
         self.fs_api.close()
 
-        print(f"Processed {self.counter} tickets in {final_duration:.2f} seconds.")
+        print(f"Processed {self.iteration_count} tickets in {final_duration:.2f} seconds.")
+        print(f"{self.failure_count} failed to update.")
+        print(f"{self.success_count} successfully updated.")
 
         if final_duration > 0:
-            print(f"Overall requests per minute: {(self.counter / final_duration) * 60:.2f}")
+            print(f"Overall requests per minute: {(self.iteration_count / final_duration) * 60:.2f}")
 
     def retry_failed(self):
         db = sqlite3.connect(database=self.db_filename, timeout=30.0)
@@ -280,6 +289,12 @@ class TicketCategoryUpdater(object):
         db.row_factory = sqlite3.Row
 
         while True:
+
+            with self.count_lock:
+                if self.iteration_limit is not None and self.iteration_count >= self.iteration_limit:
+                    break
+                self.iteration_count += 1
+
             ticket_row = None
 
             try:
@@ -320,9 +335,6 @@ class TicketCategoryUpdater(object):
 
                 status_code = response.status_code
 
-                with self.count_lock:
-                    self.counter += 1
-
                 query = """
                         UPDATE tickets
                         SET update_state         = 'updated',
@@ -333,9 +345,13 @@ class TicketCategoryUpdater(object):
                 db.execute(query, (response.status_code, ticket_row['id']))
                 db.commit()
 
+                self.success_count = self.success_count + 1
+
             except Exception as e:
                 error_message = str(e)
                 status_code = None
+
+                self.failure_count = self.failure_count + 1
 
                 if hasattr(e, 'response') and e.response is not None:
                     status_code = e.response.status_code
@@ -354,7 +370,7 @@ class TicketCategoryUpdater(object):
                         WHERE id = ?;
                         """
 
-                db.execute(update,(datetime.datetime.now(), status_code, error_message, ticket_row['id']))
+                db.execute(update,(status_code, error_message, ticket_row['id']))
                 db.commit()
 
             self._print_progress(
@@ -367,7 +383,8 @@ class TicketCategoryUpdater(object):
     def _print_progress(self, row_id: int, status_code: int | None = None):
         now = time.time()
         elapsed = now - self.start_time
-        requests_per_minute = (self.counter / elapsed) * 60 if elapsed > 0 else 0
+        total_count = self.success_count + self.failure_count
+        requests_per_minute = (total_count / elapsed) * 60 if elapsed > 0 else 0
 
         ratelimit_remaining = self.fs_api.controller.server_ratelimit_remaining
         ratelimit_total = self.fs_api.controller.server_ratelimit_total
