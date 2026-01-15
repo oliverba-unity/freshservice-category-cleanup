@@ -188,32 +188,32 @@ class TicketCategoryUpdater(object):
 
         if old_sub_category and old_item_category:
             query = """
-                    SELECT * \
+                    SELECT *
                     FROM category_mappings
                     WHERE old_category = ?
                       AND old_sub_category = ?
                       AND old_item_category = ?
-                    LIMIT 1; \
+                    LIMIT 1;
                     """
             cursor = db.execute(query, (old_category, old_sub_category, old_item_category))
         elif old_sub_category:
             query = """
-                    SELECT * \
+                    SELECT *
                     FROM category_mappings
                     WHERE old_category = ?
                       AND old_sub_category = ?
                       AND old_item_category IS NULL
-                    LIMIT 1; \
+                    LIMIT 1;
                     """
             cursor = db.execute(query, (old_category, old_sub_category))
         else:
             query = """
-                    SELECT * \
+                    SELECT *
                     FROM category_mappings
                     WHERE old_category = ?
                       AND old_sub_category IS NULL
                       AND old_item_category IS NULL
-                    LIMIT 1; \
+                    LIMIT 1;
                     """
             cursor = db.execute(query, (old_category,))
 
