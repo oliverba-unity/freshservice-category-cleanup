@@ -53,14 +53,23 @@ class BatchTicketImporter(BaseBatchProcessor):
     def _fetch_and_lock_next_item(self, db):
         try:
             # Lock DB for this thread
+            if self.random_order:
+                next_ticket_query = """
+                    SELECT *
+                    FROM tickets
+                    WHERE request_timestamp IS NULL
+                    ORDER BY RANDOM()
+                    LIMIT 1;
+                """
+            else:
+                next_ticket_query = """
+                    SELECT *
+                    FROM tickets
+                    WHERE request_timestamp IS NULL
+                    ORDER BY id DESC
+                    LIMIT 1;
+                """
             db.execute("BEGIN IMMEDIATE")
-            next_ticket_query = """
-                SELECT *
-                FROM tickets
-                WHERE request_timestamp IS NULL
-                ORDER BY id DESC
-                LIMIT 1;
-            """
             cursor = db.execute(next_ticket_query)
 
             ticket_row = cursor.fetchone()

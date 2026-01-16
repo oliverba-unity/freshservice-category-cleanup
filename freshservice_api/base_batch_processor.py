@@ -16,13 +16,14 @@ class BaseBatchProcessor(ABC):
         self.db_filename = db_filename
         self.iteration_count = 0
         self.iteration_limit = None
+        self.random_order = False
         self.success_count = 0
         self.failure_count = 0
         self.start_time = None
         self.count_lock = threading.Lock()
         self.print_lock = threading.Lock()
 
-    def run(self, limit: int = None, max_workers: int = 10):
+    def run(self, limit: int = None, random_order: bool = False, max_workers: int = 10):
         print(f"Starting {self.__class__.__name__} with {max_workers} threads...")
         self.start_time = time.time()
         self.iteration_count = 0
@@ -30,6 +31,12 @@ class BaseBatchProcessor(ABC):
         if limit:
             self.iteration_limit = int(limit)
             print(f"Limit set to {limit} {self.entity_label.lower()}s.")
+
+        if random_order:
+            self.random_order = True
+            print(f"Processing {self.entity_label.lower()}s in random order.")
+        else:
+            print(f"Processing {self.entity_label.lower()}s by ID in descending order.")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []

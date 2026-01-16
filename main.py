@@ -36,6 +36,12 @@ def main():
     )
 
     parser.add_argument(
+        "--random-order",
+        action="store_true",
+        help="Process tickets from the database in random order"
+    )
+
+    parser.add_argument(
         "--retry-failed",
         action="store_true",
         help="Retry tickets that failed in previous runs (HTTP code != 200)"
@@ -56,7 +62,7 @@ def main():
             ticket_importer.create_tables()
 
         elif args.run:
-            ticket_importer.run(limit=args.limit)
+            ticket_importer.run(limit=args.limit, random_order=args.random_order)
 
         elif args.retry_failed:
             ticket_importer.retry_failed()
@@ -75,7 +81,7 @@ def main():
             ticket_category_updater.prepare()
 
         elif args.run:
-            ticket_category_updater.run(limit=args.limit)
+            ticket_category_updater.run(limit=args.limit, random_order=args.random_order)
 
         elif args.retry_failed:
             ticket_category_updater.retry_failed()

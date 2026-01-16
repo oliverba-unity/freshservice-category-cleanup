@@ -237,14 +237,23 @@ class BatchTicketCategoryUpdater(BaseBatchProcessor):
     def _fetch_and_lock_next_item(self, db):
         try:
             # Lock DB for this thread
+            if self.random_order:
+                next_ticket_query = """
+                    SELECT *
+                    FROM tickets
+                    WHERE update_state = 'ready'
+                    ORDER BY RANDOM()
+                    LIMIT 1;
+                """
+            else:
+                next_ticket_query = """
+                    SELECT *
+                    FROM tickets
+                    WHERE update_state = 'ready'
+                    ORDER BY id DESC
+                    LIMIT 1;
+                """
             db.execute("BEGIN IMMEDIATE")
-            next_ticket_query = """
-                SELECT *
-                FROM tickets
-                WHERE update_state = 'ready'
-                ORDER BY id DESC
-                LIMIT 1;
-            """
             cursor = db.execute(next_ticket_query)
 
             ticket_row = cursor.fetchone()
